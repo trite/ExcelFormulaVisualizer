@@ -5,6 +5,15 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v0.1, v1.0, v1.2.3)'
+        required: true
+        default: 'v0.1'
+      description:
+        description: 'Version description'
+        required: false
+        default: 'New release'
 
 permissions:
   contents: read
@@ -31,8 +40,73 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
+      # For automatic pushes to main, build normally (development/preview)
+      - name: Build (standard)
+        if: github.event_name == 'push'
         run: npm run build
+
+      # For manual workflow dispatch, build versioned release
+      - name: Build (versioned release)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          DESCRIPTION="${{ github.event.inputs.description }}"
+          npx tsx scripts/deploy-version.ts "$VERSION" "$DESCRIPTION"
+
+      # Download existing gh-pages content to preserve old versions
+      - name: Download existing gh-pages
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages-existing
+        continue-on-error: true
+
+      # Merge existing versions with new build
+      - name: Merge with existing versions
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ -d "gh-pages-existing" ]; then
+            # Copy existing versioned directories (v1, v2, etc.) to dist
+            for dir in gh-pages-existing/v*/; do
+              if [ -d "$dir" ]; then
+                version=$(basename "$dir")
+                # Don't overwrite if we just built this version
+                if [ ! -d "dist/$version" ]; then
+                  cp -r "$dir" "dist/"
+                  echo "Preserved existing version: $version"
+                fi
+              fi
+            done
+            # Preserve existing versions.json entries
+            if [ -f "gh-pages-existing/versions.json" ] && [ -f "dist/versions.json" ]; then
+              node -e "
+                const existing = require('./gh-pages-existing/versions.json');
+                const newManifest = require('./dist/versions.json');
+                const allVersions = new Map();
+                // Add existing versions
+                existing.versions.forEach(v => allVersions.set(v.version, v));
+                // Override with new versions
+                newManifest.versions.forEach(v => allVersions.set(v.version, v));
+                // Sort using semantic versioning (newest first)
+                const merged = {
+                  latest: newManifest.latest,
+                  versions: Array.from(allVersions.values()).sort((a, b) => {
+                    const aParts = a.version.replace(/^v/, '').split('.').map(Number);
+                    const bParts = b.version.replace(/^v/, '').split('.').map(Number);
+                    for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+                      const aVal = aParts[i] || 0;
+                      const bVal = bParts[i] || 0;
+                      if (bVal !== aVal) return bVal - aVal;
+                    }
+                    return 0;
+                  })
+                };
+                require('fs').writeFileSync('./dist/versions.json', JSON.stringify(merged, null, 2));
+              "
+              echo "Merged versions.json"
+            fi
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

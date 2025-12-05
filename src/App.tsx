@@ -32,6 +32,7 @@ import * as XLSX from "xlsx";
 import { FileUpload } from "./components/FileUpload";
 import { ForceGraphView } from "./components/ForceGraphView";
 import { NodeDetails } from "./components/NodeDetails";
+import { VersionSwitcher } from "./components/VersionSwitcher";
 import {
   parseExcelFileWithMetadata,
   workbookToGraphData,
@@ -317,9 +318,11 @@ function App() {
         <AppBar position="static" color="default" elevation={1}>
           <Toolbar>
             <BubbleChartIcon sx={{ mr: 2 }} />
-            <Typography variant="h6" sx={{ flexGrow: 1 }}>
+            <Typography variant="h6" component="div">
               Excel Formula Visualizer
             </Typography>
+            <VersionSwitcher />
+            <Box sx={{ flexGrow: 1 }} />
             {workbook && (
               <>
                 <Chip
