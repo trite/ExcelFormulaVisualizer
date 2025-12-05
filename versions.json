@@ -1,0 +1,17 @@
+{
+  "latest": "v0.1.2",
+  "versions": [
+    {
+      "version": "v0.1.2",
+      "description": "better support for versioning",
+      "date": "2025-12-05",
+      "path": "/v0.1.2/"
+    },
+    {
+      "version": "v0.1.1",
+      "description": "Named Cell Support and bug fixes",
+      "date": "2025-12-05",
+      "path": "/v0.1.1/"
+    }
+  ]
+}
