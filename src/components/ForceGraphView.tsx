@@ -162,8 +162,12 @@ export function ForceGraphView({
   }, [selectedNodeId, data.nodes]);
 
   // Emit particles periodically for pulse effect (every 2 seconds)
+  // Only emit when tab is visible to prevent queue buildup when tab is hidden
   useEffect(() => {
     const emitPulse = () => {
+      // Skip if tab is hidden to prevent particles from queuing up
+      if (document.hidden) return;
+
       if (graphRef.current && data.links.length > 0) {
         // Emit a particle on each link
         data.links.forEach((link) => {
