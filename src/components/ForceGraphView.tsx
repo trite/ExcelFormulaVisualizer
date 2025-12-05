@@ -10,13 +10,14 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import type { ForceGraphData, ForceGraphNode, GraphNode } from "../types";
+import type { ForceGraphData, ForceGraphNode, GraphNode, GraphFilterStats } from "../types";
 import {
   SHEET_COLORS,
   SELECTION_COLORS,
   LABEL_COLORS,
   LINK_COLORS,
 } from "../theme/colors";
+import { GraphFilterControls } from "./GraphFilterControls";
 
 // Using any because ForceGraphMethods type has export issues
 type ForceGraphInstance = any;
@@ -27,6 +28,14 @@ interface ForceGraphViewProps {
   selectedNodeId?: string | null;
   onNodeSelect: (node: GraphNode | null) => void;
   cellNameMap?: Map<string, string>;
+  // Filter controls (managed by parent)
+  selectedSheet: string;
+  onSelectedSheetChange: (sheet: string) => void;
+  maxNodes: number;
+  onMaxNodesChange: (value: number) => void;
+  showOnlyFormulas: boolean;
+  onShowOnlyFormulasChange: (value: boolean) => void;
+  filterStats: GraphFilterStats;
 }
 
 interface SelectionBox {
@@ -42,11 +51,17 @@ export function ForceGraphView({
   selectedNodeId,
   onNodeSelect,
   cellNameMap,
+  selectedSheet,
+  onSelectedSheetChange,
+  maxNodes,
+  onMaxNodesChange,
+  showOnlyFormulas,
+  onShowOnlyFormulasChange,
+  filterStats,
 }: ForceGraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<ForceGraphInstance>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
-  const [selectedSheet, setSelectedSheet] = useState<string>("all");
   const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
 
   // Box selection state
@@ -80,23 +95,11 @@ export function ForceGraphView({
     return String(node);
   };
 
-  // Filter data based on selected sheet
-  const filteredData = useMemo(() => {
-    // Reset initial fit when data changes
+  // Data is now pre-filtered by App.tsx, just use it directly
+  // Reset initial fit when data changes
+  useEffect(() => {
     hasInitialFit.current = false;
-
-    if (selectedSheet === "all") {
-      return data;
-    }
-    const filteredNodes = data.nodes.filter((n) => n.sheet === selectedSheet);
-    const nodeIds = new Set(filteredNodes.map((n) => n.id));
-    const filteredLinks = data.links.filter(
-      (l) =>
-        nodeIds.has(getLinkNodeId(l.source)) &&
-        nodeIds.has(getLinkNodeId(l.target))
-    );
-    return { nodes: filteredNodes, links: filteredLinks };
-  }, [data, selectedSheet]);
+  }, [data]);
 
   // Handle container resize
   useEffect(() => {
@@ -148,7 +151,7 @@ export function ForceGraphView({
       setSelectedNodes(new Set([selectedNodeId]));
       // Center on the selected node if it exists
       if (graphRef.current) {
-        const node = filteredData.nodes.find((n) => n.id === selectedNodeId);
+        const node = data.nodes.find((n) => n.id === selectedNodeId);
         if (node && node.x !== undefined && node.y !== undefined) {
           graphRef.current.centerAt(node.x, node.y, 300);
         }
@@ -156,14 +159,14 @@ export function ForceGraphView({
     } else {
       setSelectedNodes(new Set());
     }
-  }, [selectedNodeId, filteredData.nodes]);
+  }, [selectedNodeId, data.nodes]);
 
   // Emit particles periodically for pulse effect (every 2 seconds)
   useEffect(() => {
     const emitPulse = () => {
-      if (graphRef.current && filteredData.links.length > 0) {
+      if (graphRef.current && data.links.length > 0) {
         // Emit a particle on each link
-        filteredData.links.forEach((link) => {
+        data.links.forEach((link) => {
           graphRef.current.emitParticle(link);
         });
       }
@@ -178,7 +181,7 @@ export function ForceGraphView({
       clearTimeout(initialTimeout);
       clearInterval(interval);
     };
-  }, [filteredData.links]);
+  }, [data.links]);
 
   // Compute input/output neighbor nodes and connected links for the selected node
   const { inputNodeIds, outputNodeIds, inputLinkKeys, outputLinkKeys } =
@@ -198,7 +201,7 @@ export function ForceGraphView({
       const inLinks = new Set<string>();
       const outLinks = new Set<string>();
 
-      filteredData.links.forEach((link) => {
+      data.links.forEach((link) => {
         const sourceId = getLinkNodeId(link.source);
         const targetId = getLinkNodeId(link.target);
         const linkKey = `${sourceId}->${targetId}`;
@@ -221,7 +224,7 @@ export function ForceGraphView({
         inputLinkKeys: inLinks,
         outputLinkKeys: outLinks,
       };
-    }, [selectedNodes, filteredData.links]);
+    }, [selectedNodes, data.links]);
 
   // Check if we have an active selection (for dimming logic)
   const hasActiveSelection = selectedNodes.size === 1;
@@ -364,7 +367,7 @@ export function ForceGraphView({
     (node: ForceGraphNode, translate: { x: number; y: number }) => {
       if (selectedNodes.has(node.id)) {
         // Move all selected nodes together
-        filteredData.nodes
+        data.nodes
           .filter((n) => selectedNodes.has(n.id) && n.id !== node.id)
           .forEach((n) => {
             n.fx = (n.x || 0) + translate.x;
@@ -372,14 +375,14 @@ export function ForceGraphView({
           });
       }
     },
-    [selectedNodes, filteredData.nodes]
+    [selectedNodes, data.nodes]
   );
 
   const handleNodeDragEnd = useCallback(
     (node: ForceGraphNode) => {
       if (selectedNodes.has(node.id)) {
         // Release fixed positions for all selected nodes
-        filteredData.nodes
+        data.nodes
           .filter((n) => selectedNodes.has(n.id))
           .forEach((n) => {
             n.fx = undefined;
@@ -387,7 +390,7 @@ export function ForceGraphView({
           });
       }
     },
-    [selectedNodes, filteredData.nodes]
+    [selectedNodes, data.nodes]
   );
 
   // Box selection handlers
@@ -435,7 +438,7 @@ export function ForceGraphView({
     const graph = graphRef.current;
     const nodesInBox: string[] = [];
 
-    filteredData.nodes.forEach((node) => {
+    data.nodes.forEach((node) => {
       if (node.x !== undefined && node.y !== undefined) {
         // Convert graph coordinates to screen coordinates
         const screenCoords = graph.graph2ScreenCoords(node.x, node.y);
@@ -461,7 +464,7 @@ export function ForceGraphView({
 
     setIsDragging(false);
     setSelectionBox(null);
-  }, [isDragging, selectionBox, filteredData.nodes]);
+  }, [isDragging, selectionBox, data.nodes]);
 
   // Draw custom node with label and glow effects for input/output neighbors
   const drawNode = useCallback(
@@ -590,7 +593,7 @@ export function ForceGraphView({
           <Select
             value={selectedSheet}
             label="Sheet Filter"
-            onChange={(e) => setSelectedSheet(e.target.value)}
+            onChange={(e) => onSelectedSheetChange(e.target.value)}
           >
             <MenuItem value="all">All Sheets</MenuItem>
             {sheets.map((sheet) => (
@@ -613,6 +616,15 @@ export function ForceGraphView({
             />
           ))}
         </Stack>
+        <Box sx={{ borderLeft: 1, borderColor: "divider", pl: 2, ml: 1 }}>
+          <GraphFilterControls
+            maxNodes={maxNodes}
+            showOnlyFormulas={showOnlyFormulas}
+            stats={filterStats}
+            onMaxNodesChange={onMaxNodesChange}
+            onShowOnlyFormulasChange={onShowOnlyFormulasChange}
+          />
+        </Box>
         {selectedNodes.size > 0 && (
           <Typography
             variant="body2"
@@ -632,7 +644,7 @@ export function ForceGraphView({
       >
         <ForceGraph2D
           ref={graphRef}
-          graphData={filteredData}
+          graphData={data}
           width={dimensions.width}
           height={dimensions.height}
           nodeId="id"

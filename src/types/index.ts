@@ -105,3 +105,28 @@ export interface MetadataDifference {
   excelValue?: string;
   status: "only-local" | "only-excel" | "different";
 }
+
+// Graph filtering types
+export interface GraphFilterOptions {
+  maxNodes: number;
+  showOnlyFormulas: boolean;
+  selectedSheets: string[] | "all";
+  prioritizeNamed: boolean;
+  namedCells: Set<string>;
+}
+
+export interface GraphFilterStats {
+  totalNodes: number;
+  totalEdges: number;
+  visibleNodes: number;
+  visibleEdges: number;
+  hiddenBySheet: number;
+  hiddenByFormula: number;
+  hiddenByLimit: number;
+  limitReached: boolean;
+}
+
+export interface FilteredGraphResult {
+  graphData: GraphData;
+  stats: GraphFilterStats;
+}

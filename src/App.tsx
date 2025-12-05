@@ -51,10 +51,13 @@ import {
   removeNote,
   buildCellNameMap,
 } from "./utils/metadataStore";
+import {
+  filterGraph,
+  DEFAULT_FILTER_OPTIONS,
+} from "./utils/graphFilter";
 import type {
   WorkbookData,
   GraphData,
-  ForceGraphData,
   GraphNode,
   CellMetadata,
   MetadataConflict,
@@ -80,9 +83,6 @@ function App() {
   const [workbook, setWorkbook] = useState<WorkbookData | null>(null);
   const [rawWorkbook, setRawWorkbook] = useState<XLSX.WorkBook | null>(null);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
-  const [forceGraphData, setForceGraphData] = useState<ForceGraphData | null>(
-    null
-  );
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,11 +96,65 @@ function App() {
   const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [showClearConfirmDialog, setShowClearConfirmDialog] = useState(false);
 
+  // Filter state
+  const [maxNodes, setMaxNodes] = useState(DEFAULT_FILTER_OPTIONS.maxNodes);
+  const [showOnlyFormulas, setShowOnlyFormulas] = useState(DEFAULT_FILTER_OPTIONS.showOnlyFormulas);
+  const [selectedSheet, setSelectedSheet] = useState<string>("all");
+
   // Build cell name map for quick lookups
   const cellNameMap = useMemo(
     () => buildCellNameMap(cellMetadata),
     [cellMetadata]
   );
+
+  // Build set of named cell IDs for filtering priority
+  const namedCellIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const entry of cellMetadata.names) {
+      // Cell keys can be comma-separated lists
+      const cellKeys = entry.cellKey.split(",").map((k) => k.trim());
+      cellKeys.forEach((key) => ids.add(key));
+    }
+    return ids;
+  }, [cellMetadata]);
+
+  // Apply filtering to graph data
+  const { filteredGraphData, filterStats } = useMemo(() => {
+    if (!graphData) {
+      return {
+        filteredGraphData: null,
+        filterStats: {
+          totalNodes: 0,
+          totalEdges: 0,
+          visibleNodes: 0,
+          visibleEdges: 0,
+          hiddenBySheet: 0,
+          hiddenByFormula: 0,
+          hiddenByLimit: 0,
+          limitReached: false,
+        },
+      };
+    }
+
+    const result = filterGraph(graphData, {
+      maxNodes,
+      showOnlyFormulas,
+      selectedSheets: selectedSheet === "all" ? "all" : [selectedSheet],
+      prioritizeNamed: true,
+      namedCells: namedCellIds,
+    });
+
+    return {
+      filteredGraphData: result.graphData,
+      filterStats: result.stats,
+    };
+  }, [graphData, maxNodes, showOnlyFormulas, selectedSheet, namedCellIds]);
+
+  // Convert filtered graph to force graph format
+  const forceGraphData = useMemo(() => {
+    if (!filteredGraphData || !workbook) return null;
+    return graphDataToForceGraph(filteredGraphData, workbook.sheets);
+  }, [filteredGraphData, workbook]);
 
   const handleFileSelect = useCallback(async (file: File) => {
     setIsLoading(true);
@@ -112,13 +166,13 @@ function App() {
         rawWorkbook: wb,
       } = await parseExcelFileWithMetadata(file);
       const graph = workbookToGraphData(workbookData);
-      const forceGraph = graphDataToForceGraph(graph, workbookData.sheets);
 
       setWorkbook(workbookData);
       setRawWorkbook(wb);
       setGraphData(graph);
-      setForceGraphData(forceGraph);
       setSelectedNode(null);
+      // Reset filter to show all sheets when loading new file
+      setSelectedSheet("all");
 
       // Check for metadata conflicts
       const localMetadata = loadMetadataFromStorage(workbookData.fileName);
@@ -173,11 +227,11 @@ function App() {
     setWorkbook(null);
     setRawWorkbook(null);
     setGraphData(null);
-    setForceGraphData(null);
     setSelectedNode(null);
     setError(null);
     setCellMetadata(createEmptyMetadata());
     setMetadataConflict(null);
+    setSelectedSheet("all");
   }, []);
 
   // Metadata update handlers
@@ -352,6 +406,13 @@ function App() {
                     selectedNodeId={selectedNode?.id}
                     onNodeSelect={setSelectedNode}
                     cellNameMap={cellNameMap}
+                    selectedSheet={selectedSheet}
+                    onSelectedSheetChange={setSelectedSheet}
+                    maxNodes={maxNodes}
+                    onMaxNodesChange={setMaxNodes}
+                    showOnlyFormulas={showOnlyFormulas}
+                    onShowOnlyFormulasChange={setShowOnlyFormulas}
+                    filterStats={filterStats}
                   />
                 )}
               </Paper>
