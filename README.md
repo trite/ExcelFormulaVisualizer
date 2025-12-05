@@ -1,73 +1,32 @@
-# React + TypeScript + Vite
+# Excel Formula Visualizer
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This tool is in very early development right now. **It is very important that you do NOT save over your original document if downloading a copy with metadata attached.**
 
-Currently, two official plugins are available:
+🚀 **Live Demo**: [https://trite.github.io/ExcelFormulaVisualizer/](https://trite.github.io/ExcelFormulaVisualizer/)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Deployment
 
-## React Compiler
+This project is automatically deployed to GitHub Pages when changes are pushed to the `main` branch.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Automatic Deployment
 
-## Expanding the ESLint configuration
+The GitHub Actions workflow (`.github/workflows/deploy.yml`) handles deployment automatically:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- Triggers on every push to `main`
+- Can also be triggered manually from the Actions tab
+- Builds the project and deploys to GitHub Pages
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Manual Deployment
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+To deploy manually using the gh-pages package:
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+1. Install gh-pages: `npm install -D gh-pages`
+2. Run: `npm run deploy`
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### First-Time Setup
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+To enable GitHub Pages for this repository:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+1. Go to repository Settings → Pages
+2. Under "Build and deployment", set Source to "GitHub Actions"
+3. Push to `main` branch to trigger the first deployment
