@@ -1,5 +1,15 @@
 // Formula parser to extract cell references from Excel formulas
 
+import type { NameResolver } from "./nameResolver";
+
+/**
+ * Options for extracting cell references
+ */
+export interface ExtractOptions {
+  nameResolver?: NameResolver;
+  currentSheetIndex?: number;
+}
+
 /**
  * Extracts all cell references from an Excel formula
  * Handles:
@@ -7,10 +17,12 @@
  * - Ranges: A1:B5, $A$1:$B$5
  * - Cross-sheet references: Sheet1!A1, 'Sheet Name'!A1
  * - Cross-sheet ranges: Sheet1!A1:B5
+ * - Named references: mass, myData (when nameResolver is provided)
  */
 export function extractCellReferences(
   formula: string,
-  currentSheet: string
+  currentSheet: string,
+  options?: ExtractOptions
 ): string[] {
   const references: Set<string> = new Set();
 
@@ -88,7 +100,57 @@ export function extractCellReferences(
     }
   }
 
+  // Finally, resolve named references if a NameResolver is provided
+  if (options?.nameResolver) {
+    const namedRefs = extractNamedReferences(
+      formulaWithoutCrossSheet,
+      options.nameResolver,
+      options.currentSheetIndex ?? 0
+    );
+    namedRefs.forEach((ref) => references.add(ref));
+  }
+
   return Array.from(references);
+}
+
+/**
+ * Extract named references from a formula and resolve them to cell addresses
+ */
+function extractNamedReferences(
+  formula: string,
+  nameResolver: NameResolver,
+  currentSheetIndex: number
+): string[] {
+  const references: string[] = [];
+  const allNames = nameResolver.getAllNames();
+
+  if (allNames.length === 0) {
+    return references;
+  }
+
+  // Build a regex to match any defined name
+  // Names are matched as whole words (not part of larger identifiers)
+  // Excel names can contain letters, numbers, underscores, and dots
+  // but must start with a letter, underscore, or backslash
+  for (const name of allNames) {
+    // Escape special regex characters in the name
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // Match the name as a whole word, not preceded by ! (which would be a sheet reference)
+    // and not followed by ( (which would be a function call)
+    const nameRegex = new RegExp(
+      `(?<![A-Za-z0-9_!])${escapedName}(?![A-Za-z0-9_(])`,
+      "gi"
+    );
+
+    if (nameRegex.test(formula)) {
+      // Resolve the name to cell addresses
+      const resolvedCells = nameResolver.resolveName(name, currentSheetIndex);
+      references.push(...resolvedCells);
+    }
+  }
+
+  return references;
 }
 
 /**

@@ -485,6 +485,23 @@ export function NodeDetails({
               </Typography>
             )}
           </Box>
+        ) : node.excelName ? (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Chip
+              label={node.excelName}
+              color="secondary"
+              size="small"
+              variant="outlined"
+            />
+            <Typography variant="caption" color="text.secondary">
+              (from Excel)
+            </Typography>
+            <Tooltip title="Override with custom name">
+              <IconButton size="small" onClick={handleStartEditName}>
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
         ) : (
           <Button
             size="small"

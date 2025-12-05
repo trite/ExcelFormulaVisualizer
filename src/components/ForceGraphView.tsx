@@ -473,7 +473,9 @@ export function ForceGraphView({
       ctx: CanvasRenderingContext2D,
       globalScale: number
     ) => {
-      const cellName = cellNameMap?.get(node.id);
+      // User-defined names take precedence over Excel-defined names
+      const userDefinedName = cellNameMap?.get(node.id);
+      const cellName = userDefinedName || node.excelName;
       const fontSize = 12 / globalScale;
       const nodeRadius = node.hasFormula ? 6 : 4;
       const color = getNodeColor(node);

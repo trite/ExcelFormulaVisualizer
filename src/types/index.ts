@@ -7,6 +7,7 @@ export interface CellInfo {
   formula?: string;
   value?: unknown;
   references: string[]; // Full addresses of cells this cell references
+  excelName?: string; // Excel-defined name for this cell (from Name Manager)
 }
 
 export interface SheetData {
@@ -18,6 +19,15 @@ export interface WorkbookData {
   fileName: string;
   sheets: SheetData[];
   allCells: Map<string, CellInfo>; // Keyed by fullAddress
+  definedNames: DefinedNameInfo[]; // Excel-defined names from Name Manager
+}
+
+// Excel defined name (from Name Manager)
+export interface DefinedNameInfo {
+  name: string; // The name (e.g., "mass", "myData")
+  ref: string; // The reference (e.g., "Sheet1!$A$1" or "Sheet1!$A$1:$B$10")
+  sheetScope?: number; // If defined, this name is sheet-scoped (0-indexed sheet)
+  comment?: string; // Optional comment from Excel
 }
 
 export interface GraphNode {
@@ -28,6 +38,7 @@ export interface GraphNode {
   formula?: string;
   value?: unknown;
   hasFormula: boolean;
+  excelName?: string; // Excel-defined name for this cell
 }
 
 export interface GraphEdge {
@@ -55,6 +66,7 @@ export interface ForceGraphNode {
   formula?: string;
   value?: unknown;
   hasFormula: boolean;
+  excelName?: string; // Excel-defined name for this cell
   color?: string;
   // Runtime properties added by force-graph
   x?: number;
