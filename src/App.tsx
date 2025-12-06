@@ -112,6 +112,7 @@ function App() {
   const [maxNodes, setMaxNodes] = useState(DEFAULT_FILTER_OPTIONS.maxNodes);
   const [showOnlyFormulas, setShowOnlyFormulas] = useState(DEFAULT_FILTER_OPTIONS.showOnlyFormulas);
   const [selectedSheet, setSelectedSheet] = useState<string>("all");
+  const [neighborDepth, setNeighborDepth] = useState<number | "all">("all");
 
   // Search state
   const [searchMatchIds, setSearchMatchIds] = useState<Set<string> | null>(null);
@@ -145,7 +146,9 @@ function App() {
           hiddenBySheet: 0,
           hiddenByFormula: 0,
           hiddenByLimit: 0,
+          hiddenByNeighborDepth: 0,
           limitReached: false,
+          neighborFilterActive: false,
         },
       };
     }
@@ -156,13 +159,15 @@ function App() {
       selectedSheets: selectedSheet === "all" ? "all" : [selectedSheet],
       prioritizeNamed: true,
       namedCells: namedCellIds,
+      neighborDepth,
+      selectedNodes,
     });
 
     return {
       filteredGraphData: result.graphData,
       filterStats: result.stats,
     };
-  }, [graphData, maxNodes, showOnlyFormulas, selectedSheet, namedCellIds]);
+  }, [graphData, maxNodes, showOnlyFormulas, selectedSheet, namedCellIds, neighborDepth, selectedNodes]);
 
   // Convert filtered graph to force graph format
   const forceGraphData = useMemo(() => {
@@ -478,9 +483,12 @@ function App() {
                     <GraphFilterControls
                       maxNodes={maxNodes}
                       showOnlyFormulas={showOnlyFormulas}
+                      neighborDepth={neighborDepth}
+                      hasSelection={selectedNodes.size > 0}
                       stats={filterStats}
                       onMaxNodesChange={setMaxNodes}
                       onShowOnlyFormulasChange={setShowOnlyFormulas}
+                      onNeighborDepthChange={setNeighborDepth}
                     />
                   </Box>
 

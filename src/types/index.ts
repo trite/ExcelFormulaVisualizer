@@ -135,7 +135,9 @@ export interface GraphFilterStats {
   hiddenBySheet: number;
   hiddenByFormula: number;
   hiddenByLimit: number;
+  hiddenByNeighborDepth: number;
   limitReached: boolean;
+  neighborFilterActive: boolean;
 }
 
 export interface FilteredGraphResult {

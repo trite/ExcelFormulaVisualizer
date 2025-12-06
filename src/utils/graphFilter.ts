@@ -9,6 +9,8 @@ export interface GraphFilterOptions {
   selectedSheets: string[] | "all";
   prioritizeNamed: boolean;
   namedCells: Set<string>;
+  neighborDepth: number | "all"; // 1-5 or "all" to show all nodes
+  selectedNodes: Set<string>; // Currently selected nodes for neighbor filtering
 }
 
 /**
@@ -22,7 +24,9 @@ export interface GraphFilterStats {
   hiddenBySheet: number;
   hiddenByFormula: number;
   hiddenByLimit: number;
+  hiddenByNeighborDepth: number;
   limitReached: boolean;
+  neighborFilterActive: boolean;
 }
 
 /**
@@ -52,7 +56,83 @@ export const DEFAULT_FILTER_OPTIONS: GraphFilterOptions = {
   selectedSheets: "all",
   prioritizeNamed: true,
   namedCells: new Set(),
+  neighborDepth: "all",
+  selectedNodes: new Set(),
 };
+
+/**
+ * Build adjacency lists for the graph (both directions)
+ */
+function buildAdjacencyLists(edges: GraphEdge[]): {
+  outgoing: Map<string, Set<string>>;
+  incoming: Map<string, Set<string>>;
+} {
+  const outgoing = new Map<string, Set<string>>();
+  const incoming = new Map<string, Set<string>>();
+
+  for (const edge of edges) {
+    // Outgoing: source -> targets (cells this formula references)
+    if (!outgoing.has(edge.source)) {
+      outgoing.set(edge.source, new Set());
+    }
+    outgoing.get(edge.source)!.add(edge.target);
+
+    // Incoming: target -> sources (cells that reference this cell)
+    if (!incoming.has(edge.target)) {
+      incoming.set(edge.target, new Set());
+    }
+    incoming.get(edge.target)!.add(edge.source);
+  }
+
+  return { outgoing, incoming };
+}
+
+/**
+ * Find all nodes within N hops of the seed nodes
+ * Traverses both directions (inputs and outputs)
+ */
+function findNodesWithinDepth(
+  seedNodes: Set<string>,
+  depth: number,
+  outgoing: Map<string, Set<string>>,
+  incoming: Map<string, Set<string>>
+): Set<string> {
+  const visited = new Set<string>(seedNodes);
+  let frontier = new Set<string>(seedNodes);
+
+  for (let d = 0; d < depth; d++) {
+    const nextFrontier = new Set<string>();
+
+    for (const nodeId of frontier) {
+      // Add outgoing neighbors (cells this node references)
+      const outNeighbors = outgoing.get(nodeId);
+      if (outNeighbors) {
+        for (const neighbor of outNeighbors) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor);
+            nextFrontier.add(neighbor);
+          }
+        }
+      }
+
+      // Add incoming neighbors (cells that reference this node)
+      const inNeighbors = incoming.get(nodeId);
+      if (inNeighbors) {
+        for (const neighbor of inNeighbors) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor);
+            nextFrontier.add(neighbor);
+          }
+        }
+      }
+    }
+
+    frontier = nextFrontier;
+    if (frontier.size === 0) break; // No more nodes to explore
+  }
+
+  return visited;
+}
 
 /**
  * Calculate in-degree and out-degree for each node
@@ -138,7 +218,7 @@ export function filterGraph(
   graphData: GraphData,
   options: GraphFilterOptions
 ): FilteredGraphResult {
-  const { maxNodes, showOnlyFormulas, selectedSheets, prioritizeNamed, namedCells } = options;
+  const { maxNodes, showOnlyFormulas, selectedSheets, prioritizeNamed, namedCells, neighborDepth, selectedNodes } = options;
 
   const stats: GraphFilterStats = {
     totalNodes: graphData.nodes.length,
@@ -148,7 +228,9 @@ export function filterGraph(
     hiddenBySheet: 0,
     hiddenByFormula: 0,
     hiddenByLimit: 0,
+    hiddenByNeighborDepth: 0,
     limitReached: false,
+    neighborFilterActive: false,
   };
 
   // Early return if graph is empty
@@ -183,7 +265,25 @@ export function filterGraph(
     stats.hiddenByFormula = beforeCount - filteredNodes.length;
   }
 
-  // Step 3: Calculate importance scores and sort
+  // Step 3: Apply neighbor depth filter (only if depth is not "all" and there's a selection)
+  if (neighborDepth !== "all" && selectedNodes.size > 0) {
+    stats.neighborFilterActive = true;
+    const { outgoing, incoming } = buildAdjacencyLists(graphData.edges);
+
+    // Find all nodes within the specified depth of selected nodes
+    const nodesWithinDepth = findNodesWithinDepth(
+      selectedNodes,
+      neighborDepth as number,
+      outgoing,
+      incoming
+    );
+
+    const beforeCount = filteredNodes.length;
+    filteredNodes = filteredNodes.filter((node) => nodesWithinDepth.has(node.id));
+    stats.hiddenByNeighborDepth = beforeCount - filteredNodes.length;
+  }
+
+  // Step 4: Calculate importance scores and sort
   const nodesWithScores: NodeWithMetrics[] = filteredNodes.map((node) => {
     const metrics = nodeMetrics.get(node.id) || {
       inDegree: 0,
@@ -204,7 +304,7 @@ export function filterGraph(
   // Sort by importance score descending
   nodesWithScores.sort((a, b) => b.importanceScore - a.importanceScore);
 
-  // Step 4: Apply node limit
+  // Step 5: Apply node limit
   let finalNodes: NodeWithMetrics[];
   if (nodesWithScores.length > maxNodes) {
     stats.limitReached = true;
@@ -238,7 +338,7 @@ export function filterGraph(
     finalNodes = nodesWithScores;
   }
 
-  // Step 5: Filter edges to only those connecting visible nodes
+  // Step 6: Filter edges to only those connecting visible nodes
   const visibleNodeIds = new Set(finalNodes.map((n) => n.id));
   const filteredEdges = graphData.edges.filter(
     (edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)
@@ -273,7 +373,8 @@ export function createFilterOptions(
   return {
     ...DEFAULT_FILTER_OPTIONS,
     ...overrides,
-    // Ensure namedCells is always a Set
+    // Ensure Sets are always Sets
     namedCells: overrides.namedCells || new Set(),
+    selectedNodes: overrides.selectedNodes || new Set(),
   };
 }

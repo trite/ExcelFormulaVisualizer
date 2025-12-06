@@ -15,17 +15,22 @@ import {
   DialogContent,
   DialogActions,
   Button,
+  Chip,
 } from "@mui/material";
 import type { SelectChangeEvent } from "@mui/material";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import HubIcon from "@mui/icons-material/Hub";
 import type { GraphFilterStats } from "../types";
 
 interface GraphFilterControlsProps {
   maxNodes: number;
   showOnlyFormulas: boolean;
+  neighborDepth: number | "all";
+  hasSelection: boolean;
   stats: GraphFilterStats;
   onMaxNodesChange: (value: number) => void;
   onShowOnlyFormulasChange: (value: boolean) => void;
+  onNeighborDepthChange: (value: number | "all") => void;
 }
 
 // Dropdown options for max nodes
@@ -37,12 +42,25 @@ const MAX_NODE_OPTIONS = [
   { value: Infinity, label: "All" },
 ];
 
+// Dropdown options for neighbor depth
+const NEIGHBOR_DEPTH_OPTIONS = [
+  { value: 1, label: "1 hop" },
+  { value: 2, label: "2 hops" },
+  { value: 3, label: "3 hops" },
+  { value: 4, label: "4 hops" },
+  { value: 5, label: "5 hops" },
+  { value: "all" as const, label: "All" },
+];
+
 export function GraphFilterControls({
   maxNodes,
   showOnlyFormulas,
+  neighborDepth,
+  hasSelection,
   stats,
   onMaxNodesChange,
   onShowOnlyFormulasChange,
+  onNeighborDepthChange,
 }: GraphFilterControlsProps) {
   const [showAllWarning, setShowAllWarning] = useState(false);
   const [pendingAllChange, setPendingAllChange] = useState(false);
@@ -66,6 +84,15 @@ export function GraphFilterControls({
     }
   };
 
+  const handleNeighborDepthChange = (event: SelectChangeEvent<number | string>) => {
+    const value = event.target.value;
+    if (value === "all") {
+      onNeighborDepthChange("all");
+    } else {
+      onNeighborDepthChange(Number(value));
+    }
+  };
+
   const handleConfirmAll = () => {
     setShowAllWarning(false);
     if (pendingAllChange) {
@@ -84,9 +111,9 @@ export function GraphFilterControls({
 
   return (
     <>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
         {/* Max nodes dropdown */}
-        <FormControl size="small" sx={{ minWidth: 120 }}>
+        <FormControl size="small" sx={{ minWidth: 100 }}>
           <InputLabel>Max Nodes</InputLabel>
           <Select
             value={displayValue}
@@ -94,6 +121,22 @@ export function GraphFilterControls({
             onChange={handleMaxNodesChange}
           >
             {MAX_NODE_OPTIONS.map((option) => (
+              <MenuItem key={option.label} value={option.value}>
+                {option.label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        {/* Neighbor depth dropdown */}
+        <FormControl size="small" sx={{ minWidth: 100 }} disabled={!hasSelection}>
+          <InputLabel>Neighbors</InputLabel>
+          <Select
+            value={neighborDepth}
+            label="Neighbors"
+            onChange={handleNeighborDepthChange}
+          >
+            {NEIGHBOR_DEPTH_OPTIONS.map((option) => (
               <MenuItem key={option.label} value={option.value}>
                 {option.label}
               </MenuItem>
@@ -117,17 +160,22 @@ export function GraphFilterControls({
           }
           sx={{ mr: 0 }}
         />
+      </Box>
 
+      {/* Stats row */}
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 1, flexWrap: "wrap" }}>
         {/* Stats display */}
         <Tooltip
           title={
             stats.limitReached
-              ? `Showing top ${stats.visibleNodes} nodes by importance. ${stats.hiddenByLimit} nodes hidden by limit.`
+              ? `Showing top ${stats.visibleNodes} nodes by importance. ${stats.hiddenByLimit} hidden by limit.`
+              : stats.neighborFilterActive
+              ? `Showing ${stats.visibleNodes} nodes within ${neighborDepth} hop(s) of selection. ${stats.hiddenByNeighborDepth} hidden by neighbor filter.`
               : "All nodes are visible"
           }
         >
           <Typography
-            variant="body2"
+            variant="caption"
             sx={{
               color: stats.limitReached ? "warning.main" : "text.secondary",
               display: "flex",
@@ -135,11 +183,23 @@ export function GraphFilterControls({
               gap: 0.5,
             }}
           >
-            {stats.limitReached && <WarningAmberIcon fontSize="small" />}
-            {stats.visibleNodes.toLocaleString()} of {stats.totalNodes.toLocaleString()} nodes
+            {stats.limitReached && <WarningAmberIcon sx={{ fontSize: 14 }} />}
+            {stats.visibleNodes.toLocaleString()} / {stats.totalNodes.toLocaleString()} nodes
             ({percentVisible}%)
           </Typography>
         </Tooltip>
+
+        {/* Neighbor filter active indicator */}
+        {stats.neighborFilterActive && (
+          <Chip
+            icon={<HubIcon sx={{ fontSize: 14 }} />}
+            label={`${neighborDepth} hop${neighborDepth !== 1 ? "s" : ""}`}
+            size="small"
+            color="info"
+            variant="outlined"
+            sx={{ height: 20, "& .MuiChip-label": { px: 0.5, fontSize: "0.7rem" } }}
+          />
+        )}
 
         {/* Prominent warning when less than 50% visible */}
         {showWarning && (
@@ -149,10 +209,10 @@ export function GraphFilterControls({
             sx={{
               py: 0,
               px: 1,
-              "& .MuiAlert-message": { py: 0.5 },
+              "& .MuiAlert-message": { py: 0.25, fontSize: "0.75rem" },
             }}
           >
-            Large file - increase limit or filter by sheet to see more
+            Large file - increase limit to see more
           </Alert>
         )}
       </Box>
