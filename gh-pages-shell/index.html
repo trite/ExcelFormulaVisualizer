@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Excel Formula Visualizer</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #121212;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .loader {
+      text-align: center;
+      padding: 2rem;
+    }
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 4px solid #333;
+      border-top-color: #90caf9;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 1rem;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .error {
+      background: #2d1b1b;
+      border: 1px solid #5c2626;
+      border-radius: 8px;
+      padding: 1.5rem;
+      max-width: 500px;
+      margin: 1rem;
+    }
+    .error h2 {
+      color: #ef5350;
+      margin-bottom: 0.5rem;
+    }
+    .error p {
+      color: #ccc;
+      margin-bottom: 1rem;
+    }
+    .error a {
+      color: #90caf9;
+    }
+    .version-info {
+      color: #666;
+      font-size: 0.875rem;
+      margin-top: 0.5rem;
+    }
+    /* Hide app container until loaded */
+    #app-frame {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: none;
+    }
+    #app-frame.loaded {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="loader" class="loader">
+    <div class="spinner"></div>
+    <p>Loading Excel Formula Visualizer...</p>
+    <p class="version-info" id="version-info"></p>
+  </div>
+
+  <div id="error" class="error" style="display: none;">
+    <h2>Failed to Load</h2>
+    <p id="error-message"></p>
+    <p>
+      <a href="versions.html">View all available versions</a>
+    </p>
+  </div>
+
+  <iframe id="app-frame" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+
+  <script>
+    const JSDELIVR_BASE = 'https://cdn.jsdelivr.net/gh';
+    const REPO = 'trite/ExcelFormulaVisualizer';
+
+    // Get version from URL path (e.g., /v0.1.2/) or query param (?v=0.1.2)
+    function getRequestedVersion() {
+      const pathMatch = window.location.pathname.match(/\/(v[\d.]+)\/?$/);
+      if (pathMatch) return pathMatch[1];
+
+      const urlParams = new URLSearchParams(window.location.search);
+      return urlParams.get('v');
+    }
+
+    // Show error message
+    function showError(message) {
+      document.getElementById('loader').style.display = 'none';
+      document.getElementById('error').style.display = 'block';
+      document.getElementById('error-message').textContent = message;
+    }
+
+    // Load the app
+    async function loadApp() {
+      try {
+        // Fetch versions manifest
+        const versionsResponse = await fetch('versions.json');
+        if (!versionsResponse.ok) {
+          throw new Error('Could not load versions.json');
+        }
+        const versions = await versionsResponse.json();
+
+        // Determine which version to load
+        let targetVersion = getRequestedVersion();
+        if (!targetVersion) {
+          targetVersion = versions.latest;
+        }
+
+        // Validate version exists
+        const versionEntry = versions.versions.find(v => v.version === targetVersion);
+        if (!versionEntry) {
+          throw new Error(`Version ${targetVersion} not found. Available versions: ${versions.versions.map(v => v.version).join(', ')}`);
+        }
+
+        document.getElementById('version-info').textContent = `Loading ${targetVersion}...`;
+
+        // Construct jsDelivr URL for the version
+        // jsDelivr serves from GitHub tags, so we use: /gh/user/repo@tag/path
+        const cdnBase = `${JSDELIVR_BASE}/${REPO}@${targetVersion}/dist`;
+
+        // Load the app in an iframe pointing to jsDelivr
+        // We need to construct a full HTML page that loads the assets
+        const frame = document.getElementById('app-frame');
+
+        // First, fetch the index.html from the CDN to get the asset paths
+        const indexResponse = await fetch(`${cdnBase}/index.html`);
+        if (!indexResponse.ok) {
+          throw new Error(`Could not load version ${targetVersion} from CDN. The version may not be published yet.`);
+        }
+
+        let indexHtml = await indexResponse.text();
+
+        // Rewrite relative asset paths to use the CDN
+        // Match src="./assets/..." or src="/assets/..." or href="./assets/..."
+        indexHtml = indexHtml.replace(
+          /(src|href)=["']\.?\/?assets\//g,
+          `$1="${cdnBase}/assets/`
+        );
+
+        // Also handle any absolute paths that might reference the base
+        indexHtml = indexHtml.replace(
+          /(src|href)=["']\/ExcelFormulaVisualizer\/[^"']*\/assets\//g,
+          `$1="${cdnBase}/assets/`
+        );
+
+        // Inject version info into the page
+        const versionMeta = `<meta name="app-version" content="${targetVersion}">`;
+        indexHtml = indexHtml.replace('<head>', `<head>\n    ${versionMeta}`);
+
+        // Create a blob URL for the modified HTML
+        const blob = new Blob([indexHtml], { type: 'text/html' });
+        const blobUrl = URL.createObjectURL(blob);
+
+        // Load in iframe
+        frame.onload = () => {
+          document.getElementById('loader').style.display = 'none';
+          frame.classList.add('loaded');
+        };
+
+        frame.onerror = () => {
+          showError(`Failed to load version ${targetVersion}`);
+        };
+
+        frame.src = blobUrl;
+
+      } catch (err) {
+        console.error('Load error:', err);
+        showError(err.message);
+      }
+    }
+
+    // Start loading
+    loadApp();
+  </script>
+</body>
+</html>

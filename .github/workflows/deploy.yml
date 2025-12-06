@@ -34,7 +34,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Needed for tag info
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -49,11 +49,17 @@ jobs:
       - name: Determine deployment type
         id: deploy-type
         run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Ref: ${{ github.ref }}"
+          echo "Ref name: ${{ github.ref_name }}"
+          echo "Ref type: ${{ github.ref_type }}"
+
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "type=versioned" >> $GITHUB_OUTPUT
             echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
             echo "description=${{ github.event.inputs.description }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "Detected: workflow_dispatch versioned release"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
             VERSION="${{ github.ref_name }}"
             echo "type=versioned" >> $GITHUB_OUTPUT
             echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -63,74 +69,165 @@ jobs:
               TAG_MSG="Release $VERSION"
             fi
             echo "description=$TAG_MSG" >> $GITHUB_OUTPUT
+            echo "Detected: tag push versioned release ($VERSION)"
           else
             echo "type=development" >> $GITHUB_OUTPUT
             echo "version=" >> $GITHUB_OUTPUT
             echo "description=" >> $GITHUB_OUTPUT
+            echo "Detected: development build (shell update only)"
           fi
-          echo "Deployment type: $(cat $GITHUB_OUTPUT | grep type)"
 
-      # For development builds (push to main without tag)
-      - name: Build (development)
-        if: steps.deploy-type.outputs.type == 'development'
-        run: npm run build
+      # =========================================================================
+      # VERSIONED RELEASE: Build, commit dist to tag, create release, update shell
+      # =========================================================================
 
-      # For versioned releases (tag push or workflow dispatch)
-      - name: Build (versioned release)
+      - name: Build for production
+        if: steps.deploy-type.outputs.type == 'versioned'
+        run: |
+          VERSION="${{ steps.deploy-type.outputs.version }}"
+          # Build with a base path that works with jsDelivr
+          # jsDelivr serves from: /gh/user/repo@tag/dist/
+          npm run build -- --base="./"
+        env:
+          NODE_ENV: production
+
+      # Commit the dist folder to the tag so jsDelivr can serve it
+      - name: Commit dist to version tag
+        if: steps.deploy-type.outputs.type == 'versioned'
+        run: |
+          VERSION="${{ steps.deploy-type.outputs.version }}"
+
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Add dist folder (normally gitignored)
+          git add -f dist/
+
+          # Create a new commit with the dist folder
+          git commit -m "Build: Add dist folder for $VERSION [skip ci]" || echo "No changes to commit"
+
+          # Force update the tag to include this commit
+          git tag -f "$VERSION" -m "${{ steps.deploy-type.outputs.description }}"
+
+          # Push the updated tag
+          git push origin "$VERSION" --force
+
+      # Create GitHub Release
+      - name: Create GitHub Release
+        if: steps.deploy-type.outputs.type == 'versioned'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.deploy-type.outputs.version }}
+          name: ${{ steps.deploy-type.outputs.version }}
+          body: ${{ steps.deploy-type.outputs.description }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # =========================================================================
+      # UPDATE SHELL: Fetch existing versions.json, merge, deploy to gh-pages
+      # =========================================================================
+
+      # Checkout gh-pages branch to get existing versions.json
+      - name: Checkout gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages-current
+        continue-on-error: true
+
+      # Prepare the shell content
+      - name: Prepare shell for deployment
+        run: |
+          # Start with the shell template from main branch
+          cp -r gh-pages-shell deploy-shell
+
+          # If gh-pages exists, get the current versions.json
+          if [ -f "gh-pages-current/versions.json" ]; then
+            cp gh-pages-current/versions.json deploy-shell/versions.json
+            echo "Using existing versions.json from gh-pages"
+          else
+            echo '{"latest":"","versions":[]}' > deploy-shell/versions.json
+            echo "Created new versions.json"
+          fi
+
+      # Update versions.json for versioned releases
+      - name: Update versions.json
         if: steps.deploy-type.outputs.type == 'versioned'
         run: |
           VERSION="${{ steps.deploy-type.outputs.version }}"
           DESCRIPTION="${{ steps.deploy-type.outputs.description }}"
-          npx tsx scripts/deploy-version.ts "$VERSION" "$DESCRIPTION"
+          DATE=$(date +%Y-%m-%d)
 
-      # Fetch existing versions.json from gh-pages to merge with new version
-      - name: Fetch and merge versions.json
-        if: steps.deploy-type.outputs.type == 'versioned'
-        run: |
-          # Try to fetch existing versions.json from deployed site
-          curl -sS "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/versions.json" -o existing-versions.json 2>/dev/null || echo '{"latest":"","versions":[]}' > existing-versions.json
+          node -e "
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('./deploy-shell/versions.json', 'utf-8'));
 
-          if [ -f "existing-versions.json" ] && [ -f "dist/versions.json" ]; then
-            node -e "
-              const fs = require('fs');
-              let existing;
-              try {
-                existing = JSON.parse(fs.readFileSync('./existing-versions.json', 'utf-8'));
-              } catch(e) {
-                existing = { latest: '', versions: [] };
+            // Remove existing entry for this version if it exists
+            manifest.versions = manifest.versions.filter(v => v.version !== '$VERSION');
+
+            // Add the new version
+            manifest.versions.unshift({
+              version: '$VERSION',
+              description: '$DESCRIPTION',
+              date: '$DATE'
+            });
+
+            // Sort by semantic version (newest first)
+            manifest.versions.sort((a, b) => {
+              const aParts = a.version.replace(/^v/, '').split('.').map(Number);
+              const bParts = b.version.replace(/^v/, '').split('.').map(Number);
+              for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+                const aVal = aParts[i] || 0;
+                const bVal = bParts[i] || 0;
+                if (bVal !== aVal) return bVal - aVal;
               }
-              const newManifest = JSON.parse(fs.readFileSync('./dist/versions.json', 'utf-8'));
-              const allVersions = new Map();
-              // Add existing versions
-              (existing.versions || []).forEach(v => allVersions.set(v.version, v));
-              // Override with new versions
-              (newManifest.versions || []).forEach(v => allVersions.set(v.version, v));
-              // Sort using semantic versioning (newest first)
-              const merged = {
-                latest: newManifest.latest,
-                versions: Array.from(allVersions.values()).sort((a, b) => {
-                  const aParts = a.version.replace(/^v/, '').split('.').map(Number);
-                  const bParts = b.version.replace(/^v/, '').split('.').map(Number);
-                  for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-                    const aVal = aParts[i] || 0;
-                    const bVal = bParts[i] || 0;
-                    if (bVal !== aVal) return bVal - aVal;
-                  }
-                  return 0;
-                })
-              };
-              fs.writeFileSync('./dist/versions.json', JSON.stringify(merged, null, 2));
-              console.log('Merged versions.json:', JSON.stringify(merged, null, 2));
-            "
-          fi
+              return 0;
+            });
 
-      # Deploy using peaceiris/actions-gh-pages which properly maintains the gh-pages branch
-      - name: Deploy to GitHub Pages
+            // Latest is the first (highest) version
+            manifest.latest = manifest.versions[0]?.version || '';
+
+            fs.writeFileSync('./deploy-shell/versions.json', JSON.stringify(manifest, null, 2));
+            console.log('Updated versions.json:', JSON.stringify(manifest, null, 2));
+          "
+
+      # Deploy shell to gh-pages
+      - name: Deploy shell to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
-          # keep_files preserves existing content in gh-pages branch (e.g., older versions)
-          keep_files: ${{ steps.deploy-type.outputs.type == 'versioned' }}
-          # Force push for development builds (non-versioned), incremental for versioned
-          force_orphan: ${{ steps.deploy-type.outputs.type == 'development' }}
+          publish_dir: ./deploy-shell
+          # Always force for shell - it's just a few small files
+          force_orphan: false
+          keep_files: false
+
+      # =========================================================================
+      # SUMMARY
+      # =========================================================================
+
+      - name: Deployment summary
+        run: |
+          REPO_NAME="${{ github.repository }}"
+          REPO_NAME="${REPO_NAME#*/}"
+
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type:** ${{ steps.deploy-type.outputs.type }}" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ steps.deploy-type.outputs.type }}" == "versioned" ]]; then
+            echo "- **Version:** ${{ steps.deploy-type.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Description:** ${{ steps.deploy-type.outputs.description }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### URLs" >> $GITHUB_STEP_SUMMARY
+            echo "- **App:** https://${{ github.repository_owner }}.github.io/${REPO_NAME}/?v=${{ steps.deploy-type.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **CDN:** https://cdn.jsdelivr.net/gh/${{ github.repository }}@${{ steps.deploy-type.outputs.version }}/dist/" >> $GITHUB_STEP_SUMMARY
+            echo "- **Release:** https://github.com/${{ github.repository }}/releases/tag/${{ steps.deploy-type.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Shell updated. No new version deployed." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Site:** https://${{ github.repository_owner }}.github.io/${REPO_NAME}/" >> $GITHUB_STEP_SUMMARY
+          fi

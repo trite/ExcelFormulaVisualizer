@@ -19,7 +19,6 @@ interface VersionEntry {
   version: string;
   description: string;
   date: string;
-  path: string;
 }
 
 interface VersionsManifest {
@@ -27,21 +26,59 @@ interface VersionsManifest {
   versions: VersionEntry[];
 }
 
-// Get the current version from the URL path
+// Get the current version from meta tag (injected by shell) or URL
 function getCurrentVersion(): string | null {
-  const match = window.location.pathname.match(/\/(v\d+(?:\.\d+)*)\//);
+  // Check for meta tag first (set by the shell loader)
+  const metaTag = document.querySelector('meta[name="app-version"]');
+  if (metaTag) {
+    return metaTag.getAttribute("content");
+  }
+
+  // Fallback: check URL query param
+  const urlParams = new URLSearchParams(window.location.search);
+  const vParam = urlParams.get("v");
+  if (vParam) return vParam;
+
+  // Fallback: check URL path pattern
+  const match = window.location.pathname.match(/\/(v\d+(?:\.\d+)*)\/?/);
   return match ? match[1] : null;
 }
 
-// Get the base path for versions (everything before the version)
-function getBasePath(): string {
-  const path = window.location.pathname;
-  const match = path.match(/(.*)\/v\d+(?:\.\d+)*\//);
-  if (match) {
-    return match[1];
+// Check if we're running inside the shell's iframe
+function isInShellIframe(): boolean {
+  try {
+    return window.parent !== window && window.parent.location.origin === window.location.origin;
+  } catch {
+    // Cross-origin - we're in an iframe but can't access parent
+    return true;
   }
-  // If no version in path, return the current path without trailing slash
-  return path.replace(/\/$/, "");
+}
+
+// Get the shell's base URL for fetching versions.json
+function getShellBaseUrl(): string {
+  // If in iframe, try to get parent's origin
+  try {
+    if (window.parent !== window) {
+      return window.parent.location.origin + window.parent.location.pathname.replace(/\/[^/]*$/, "");
+    }
+  } catch {
+    // Cross-origin, can't access parent
+  }
+
+  // Fallback: construct from current location
+  // jsDelivr URL pattern: cdn.jsdelivr.net/gh/user/repo@version/dist/
+  if (window.location.hostname === "cdn.jsdelivr.net") {
+    // We're loaded directly from CDN, versions.json is on GitHub Pages
+    // Extract user/repo from path
+    const match = window.location.pathname.match(/\/gh\/([^@]+)@/);
+    if (match) {
+      const [user, repo] = match[1].split("/");
+      return `https://${user}.github.io/${repo}`;
+    }
+  }
+
+  // Default: assume versions.json is at the site root
+  return window.location.origin;
 }
 
 export function VersionSwitcher() {
@@ -68,9 +105,8 @@ export function VersionSwitcher() {
     setLoading(true);
     setError(null);
     try {
-      // Try to load versions.json from the root of the GitHub Pages site
-      const basePath = getBasePath();
-      const versionsUrl = `${basePath}/versions.json`;
+      const baseUrl = getShellBaseUrl();
+      const versionsUrl = `${baseUrl}/versions.json`;
       const response = await fetch(versionsUrl);
       if (!response.ok) {
         throw new Error("versions.json not found");
@@ -86,8 +122,35 @@ export function VersionSwitcher() {
   };
 
   const navigateToVersion = (version: VersionEntry) => {
-    const basePath = getBasePath();
-    window.location.href = `${basePath}${version.path}`;
+    const baseUrl = getShellBaseUrl();
+
+    if (isInShellIframe()) {
+      // Navigate the parent window (the shell)
+      try {
+        window.parent.location.href = `${baseUrl}/?v=${version.version}`;
+        return;
+      } catch {
+        // Cross-origin, fall through to regular navigation
+      }
+    }
+
+    // Direct navigation (not in iframe or cross-origin)
+    window.location.href = `${baseUrl}/?v=${version.version}`;
+  };
+
+  const openVersionsPage = () => {
+    const baseUrl = getShellBaseUrl();
+
+    if (isInShellIframe()) {
+      try {
+        window.parent.open(`${baseUrl}/versions.html`, "_blank");
+        return;
+      } catch {
+        // Cross-origin, fall through
+      }
+    }
+
+    window.open(`${baseUrl}/versions.html`, "_blank");
   };
 
   // Pre-load versions on mount for faster menu display
@@ -202,12 +265,7 @@ export function VersionSwitcher() {
         {versions && (
           <>
             <Divider />
-            <MenuItem
-              onClick={() => {
-                const basePath = getBasePath();
-                window.open(`${basePath}/versions.html`, "_blank");
-              }}
-            >
+            <MenuItem onClick={openVersionsPage}>
               <ListItemIcon>
                 <OpenInNewIcon fontSize="small" />
               </ListItemIcon>
