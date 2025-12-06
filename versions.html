@@ -5,68 +5,147 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Excel Formula Visualizer - All Versions</title>
   <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
     body {
-      font-family: system-ui, sans-serif;
-      max-width: 600px;
-      margin: 40px auto;
-      padding: 20px;
+      font-family: system-ui, -apple-system, sans-serif;
       background: #121212;
       color: #fff;
+      min-height: 100vh;
+      padding: 2rem;
     }
-    h1 { color: #90caf9; }
-    .version {
-      padding: 15px;
-      margin: 10px 0;
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #90caf9;
+      margin-bottom: 0.5rem;
+    }
+    .subtitle {
+      color: #888;
+      margin-bottom: 2rem;
+    }
+    .version-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .version-card {
       background: #1e1e1e;
       border-radius: 8px;
+      padding: 1.25rem;
       border-left: 4px solid #90caf9;
+      transition: transform 0.2s, box-shadow 0.2s;
     }
-    .version.latest { border-left-color: #4caf50; }
-    .version a {
+    .version-card:hover {
+      transform: translateX(4px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .version-card.latest {
+      border-left-color: #4caf50;
+    }
+    .version-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+    .version-link {
       color: #90caf9;
       text-decoration: none;
-      font-size: 1.2em;
-      font-weight: bold;
+      font-size: 1.25rem;
+      font-weight: 600;
     }
-    .version a:hover { text-decoration: underline; }
-    .version .meta {
-      color: #888;
-      font-size: 0.9em;
-      margin-top: 5px;
+    .version-link:hover {
+      text-decoration: underline;
     }
-    .version .desc { margin-top: 8px; }
     .badge {
-      display: inline-block;
       background: #4caf50;
       color: #fff;
-      padding: 2px 8px;
+      padding: 0.125rem 0.5rem;
       border-radius: 4px;
-      font-size: 0.8em;
-      margin-left: 10px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .version-date {
+      color: #666;
+      font-size: 0.875rem;
+    }
+    .version-description {
+      color: #aaa;
+      margin-top: 0.5rem;
+    }
+    .loading, .error {
+      text-align: center;
+      padding: 2rem;
+      color: #888;
+    }
+    .error {
+      color: #ef5350;
+    }
+    .back-link {
+      display: inline-block;
+      margin-top: 2rem;
+      color: #90caf9;
+      text-decoration: none;
+    }
+    .back-link:hover {
+      text-decoration: underline;
     }
   </style>
 </head>
 <body>
-  <h1>Excel Formula Visualizer</h1>
-  <p>Select a version to use:</p>
-  <div id="versions"></div>
+  <div class="container">
+    <h1>Excel Formula Visualizer</h1>
+    <p class="subtitle">Select a version to use</p>
+
+    <div id="content" class="loading">Loading versions...</div>
+
+    <a href="./" class="back-link">&larr; Back to app</a>
+  </div>
+
   <script>
-    fetch('./versions.json')
-      .then(r => r.json())
-      .then(data => {
-        const container = document.getElementById('versions');
-        data.versions.forEach(v => {
+    async function loadVersions() {
+      const content = document.getElementById('content');
+
+      try {
+        const response = await fetch('versions.json');
+        if (!response.ok) throw new Error('Failed to load versions');
+
+        const data = await response.json();
+
+        if (!data.versions || data.versions.length === 0) {
+          content.innerHTML = '<p class="error">No versions available</p>';
+          return;
+        }
+
+        content.className = 'version-list';
+        content.innerHTML = data.versions.map(v => {
           const isLatest = v.version === data.latest;
-          container.innerHTML += `
-            <div class="version ${isLatest ? 'latest' : ''}">
-              <a href=".${v.path}">${v.version}</a>
-              ${isLatest ? '<span class="badge">Latest</span>' : ''}
-              <div class="meta">${v.date}</div>
-              <div class="desc">${v.description}</div>
+          return `
+            <div class="version-card ${isLatest ? 'latest' : ''}">
+              <div class="version-header">
+                <a href="./?v=${v.version}" class="version-link">${v.version}</a>
+                ${isLatest ? '<span class="badge">Latest</span>' : ''}
+              </div>
+              <div class="version-date">${v.date}</div>
+              <div class="version-description">${v.description}</div>
             </div>
           `;
-        });
-      });
+        }).join('');
+
+      } catch (err) {
+        console.error('Error loading versions:', err);
+        content.className = 'error';
+        content.textContent = 'Failed to load version list';
+      }
+    }
+
+    loadVersions();
   </script>
 </body>
 </html>
