@@ -1,6 +1,5 @@
 import { useState, useMemo } from "react";
 import {
-  Paper,
   Typography,
   Box,
   Chip,
@@ -17,6 +16,7 @@ import {
   IconButton,
   Alert,
   Tooltip,
+  Paper,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import FunctionsIcon from "@mui/icons-material/Functions";
@@ -385,16 +385,16 @@ export function NodeDetails({
 
   if (!node) {
     return (
-      <Paper sx={{ p: 2, height: "100%" }}>
+      <Box sx={{ p: 2, height: "100%" }}>
         <Typography color="text.secondary" sx={{ fontStyle: "italic" }}>
           Click on a node to see its details
         </Typography>
-      </Paper>
+      </Box>
     );
   }
 
   return (
-    <Paper sx={{ p: 2, height: "100%", overflow: "auto" }}>
+    <Box sx={{ p: 2, height: "100%", overflow: "auto" }}>
       <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
         {node.hasFormula ? (
           <FunctionsIcon color="primary" />
@@ -750,6 +750,6 @@ export function NodeDetails({
           )}
         </AccordionDetails>
       </Accordion>
-    </Paper>
+    </Box>
   );
 }

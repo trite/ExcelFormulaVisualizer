@@ -2,22 +2,17 @@ import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import {
   Box,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Chip,
   Stack,
   Typography,
 } from "@mui/material";
-import type { ForceGraphData, ForceGraphNode, GraphNode, GraphFilterStats } from "../types";
+import type { ForceGraphData, ForceGraphNode, GraphNode } from "../types";
 import {
   SHEET_COLORS,
   SELECTION_COLORS,
   LABEL_COLORS,
   LINK_COLORS,
 } from "../theme/colors";
-import { GraphFilterControls } from "./GraphFilterControls";
 
 // Using any because ForceGraphMethods type has export issues
 type ForceGraphInstance = any;
@@ -25,17 +20,10 @@ type ForceGraphInstance = any;
 interface ForceGraphViewProps {
   data: ForceGraphData;
   sheets: string[];
-  selectedNodeId?: string | null;
+  selectedNodes: Set<string>;
+  onSelectionChange: (nodes: Set<string>) => void;
   onNodeSelect: (node: GraphNode | null) => void;
   cellNameMap?: Map<string, string>;
-  // Filter controls (managed by parent)
-  selectedSheet: string;
-  onSelectedSheetChange: (sheet: string) => void;
-  maxNodes: number;
-  onMaxNodesChange: (value: number) => void;
-  showOnlyFormulas: boolean;
-  onShowOnlyFormulasChange: (value: boolean) => void;
-  filterStats: GraphFilterStats;
 }
 
 interface SelectionBox {
@@ -48,21 +36,14 @@ interface SelectionBox {
 export function ForceGraphView({
   data,
   sheets,
-  selectedNodeId,
+  selectedNodes,
+  onSelectionChange,
   onNodeSelect,
   cellNameMap,
-  selectedSheet,
-  onSelectedSheetChange,
-  maxNodes,
-  onMaxNodesChange,
-  showOnlyFormulas,
-  onShowOnlyFormulasChange,
-  filterStats,
 }: ForceGraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<ForceGraphInstance>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
-  const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
 
   // Box selection state
   const [isShiftDown, setIsShiftDown] = useState(false);
@@ -76,6 +57,9 @@ export function ForceGraphView({
   // Store refs to avoid recreating callbacks
   const onNodeSelectRef = useRef(onNodeSelect);
   onNodeSelectRef.current = onNodeSelect;
+
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
 
   // Create stable color map
   const sheetColorMap = useMemo(() => {
@@ -95,7 +79,6 @@ export function ForceGraphView({
     return String(node);
   };
 
-  // Data is now pre-filtered by App.tsx, just use it directly
   // Reset initial fit when data changes
   useEffect(() => {
     hasInitialFit.current = false;
@@ -145,40 +128,31 @@ export function ForceGraphView({
     };
   }, [isDragging]);
 
-  // Sync selection when selectedNodeId changes externally
+  // Center on selected nodes when selection changes externally
   useEffect(() => {
-    if (selectedNodeId) {
-      setSelectedNodes(new Set([selectedNodeId]));
-      // Center on the selected node if it exists
-      if (graphRef.current) {
-        const node = data.nodes.find((n) => n.id === selectedNodeId);
-        if (node && node.x !== undefined && node.y !== undefined) {
-          graphRef.current.centerAt(node.x, node.y, 300);
-        }
+    if (selectedNodes.size > 0 && graphRef.current) {
+      // Center on the first selected node
+      const firstSelectedId = Array.from(selectedNodes)[0];
+      const node = data.nodes.find((n) => n.id === firstSelectedId);
+      if (node && node.x !== undefined && node.y !== undefined) {
+        graphRef.current.centerAt(node.x, node.y, 300);
       }
-    } else {
-      setSelectedNodes(new Set());
     }
-  }, [selectedNodeId, data.nodes]);
+  }, [selectedNodes, data.nodes]);
 
   // Emit particles periodically for pulse effect (every 2 seconds)
-  // Only emit when tab is visible to prevent queue buildup when tab is hidden
   useEffect(() => {
     const emitPulse = () => {
-      // Skip if tab is hidden to prevent particles from queuing up
       if (document.hidden) return;
 
       if (graphRef.current && data.links.length > 0) {
-        // Emit a particle on each link
         data.links.forEach((link) => {
           graphRef.current.emitParticle(link);
         });
       }
     };
 
-    // Emit initial pulse after a short delay
     const initialTimeout = setTimeout(emitPulse, 500);
-    // Then emit every 2 seconds
     const interval = setInterval(emitPulse, 2000);
 
     return () => {
@@ -210,12 +184,10 @@ export function ForceGraphView({
         const targetId = getLinkNodeId(link.target);
         const linkKey = `${sourceId}->${targetId}`;
 
-        // If selected node is the target, source is an input
         if (targetId === selectedId) {
           inputs.add(sourceId);
           inLinks.add(linkKey);
         }
-        // If selected node is the source, target is an output
         if (sourceId === selectedId) {
           outputs.add(targetId);
           outLinks.add(linkKey);
@@ -230,13 +202,10 @@ export function ForceGraphView({
       };
     }, [selectedNodes, data.links]);
 
-  // Check if we have an active selection (for dimming logic)
   const hasActiveSelection = selectedNodes.size === 1;
 
-  // Get node color based on sheet and neighbor state (selected nodes keep their sheet color)
   const getNodeColor = useCallback(
     (node: ForceGraphNode) => {
-      // Dim non-connected nodes when there's an active selection
       if (
         hasActiveSelection &&
         !selectedNodes.has(node.id) &&
@@ -244,20 +213,13 @@ export function ForceGraphView({
         !outputNodeIds.has(node.id)
       ) {
         const baseColor = sheetColorMap[node.sheet] || "#90caf9";
-        return baseColor + "40"; // Add alpha for dimming
+        return baseColor + "40";
       }
       return sheetColorMap[node.sheet] || "#90caf9";
     },
-    [
-      sheetColorMap,
-      selectedNodes,
-      inputNodeIds,
-      outputNodeIds,
-      hasActiveSelection,
-    ]
+    [sheetColorMap, selectedNodes, inputNodeIds, outputNodeIds, hasActiveSelection]
   );
 
-  // Get link color based on connection to selected node
   const getLinkColor = useCallback(
     (link: { source: unknown; target: unknown }) => {
       if (!hasActiveSelection) {
@@ -279,7 +241,6 @@ export function ForceGraphView({
     [hasActiveSelection, inputLinkKeys, outputLinkKeys]
   );
 
-  // Get link width based on connection to selected node
   const getLinkWidth = useCallback(
     (link: { source: unknown; target: unknown }) => {
       if (!hasActiveSelection) {
@@ -291,14 +252,13 @@ export function ForceGraphView({
       const linkKey = `${sourceId}->${targetId}`;
 
       if (inputLinkKeys.has(linkKey) || outputLinkKeys.has(linkKey)) {
-        return 2; // Thicker for connected links
+        return 2;
       }
-      return 0.5; // Thinner for non-connected links
+      return 0.5;
     },
     [hasActiveSelection, inputLinkKeys, outputLinkKeys]
   );
 
-  // Get particle color matching link color
   const getParticleColor = useCallback(
     (link: { source: unknown; target: unknown }) => {
       if (!hasActiveSelection) {
@@ -320,31 +280,26 @@ export function ForceGraphView({
     [hasActiveSelection, inputLinkKeys, outputLinkKeys]
   );
 
-  // Handle node click with multi-selection support (idiomatic approach from force-graph example)
+  // Handle node click with multi-selection support
   const handleNodeClick = useCallback(
     (node: ForceGraphNode, event: MouseEvent) => {
       if (event.ctrlKey || event.shiftKey || event.altKey) {
         // Multi-selection mode: toggle node in selection
-        setSelectedNodes((prev) => {
-          const newSet = new Set(prev);
-          if (newSet.has(node.id)) {
-            newSet.delete(node.id);
-          } else {
-            newSet.add(node.id);
-          }
-          return newSet;
-        });
+        const newSet = new Set(selectedNodes);
+        if (newSet.has(node.id)) {
+          newSet.delete(node.id);
+        } else {
+          newSet.add(node.id);
+        }
+        onSelectionChangeRef.current(newSet);
       } else {
         // Single selection mode
-        const wasOnlySelected =
-          selectedNodes.has(node.id) && selectedNodes.size === 1;
+        const wasOnlySelected = selectedNodes.has(node.id) && selectedNodes.size === 1;
         if (wasOnlySelected) {
-          // Clicking the only selected node deselects it
-          setSelectedNodes(new Set());
+          onSelectionChangeRef.current(new Set());
           onNodeSelectRef.current(null);
         } else {
-          // Select only this node
-          setSelectedNodes(new Set([node.id]));
+          onSelectionChangeRef.current(new Set([node.id]));
           onNodeSelectRef.current({
             id: node.id,
             label: node.label,
@@ -360,17 +315,14 @@ export function ForceGraphView({
     [selectedNodes]
   );
 
-  // Handle background click to clear selection
   const handleBackgroundClick = useCallback(() => {
-    setSelectedNodes(new Set());
+    onSelectionChangeRef.current(new Set());
     onNodeSelectRef.current(null);
   }, []);
 
-  // Handle multi-node drag (from force-graph example)
   const handleNodeDrag = useCallback(
     (node: ForceGraphNode, translate: { x: number; y: number }) => {
       if (selectedNodes.has(node.id)) {
-        // Move all selected nodes together
         data.nodes
           .filter((n) => selectedNodes.has(n.id) && n.id !== node.id)
           .forEach((n) => {
@@ -385,7 +337,6 @@ export function ForceGraphView({
   const handleNodeDragEnd = useCallback(
     (node: ForceGraphNode) => {
       if (selectedNodes.has(node.id)) {
-        // Release fixed positions for all selected nodes
         data.nodes
           .filter((n) => selectedNodes.has(n.id))
           .forEach((n) => {
@@ -420,7 +371,7 @@ export function ForceGraphView({
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
 
-      setSelectionBox((prev) => (prev ? { ...prev, endX: x, endY: y } : null));
+      setSelectionBox((prev: SelectionBox | null) => (prev ? { ...prev, endX: x, endY: y } : null));
     },
     [isDragging, selectionBox]
   );
@@ -432,19 +383,16 @@ export function ForceGraphView({
       return;
     }
 
-    // Calculate box bounds in screen coordinates
     const minX = Math.min(selectionBox.startX, selectionBox.endX);
     const maxX = Math.max(selectionBox.startX, selectionBox.endX);
     const minY = Math.min(selectionBox.startY, selectionBox.endY);
     const maxY = Math.max(selectionBox.startY, selectionBox.endY);
 
-    // Find nodes within the selection box
     const graph = graphRef.current;
     const nodesInBox: string[] = [];
 
     data.nodes.forEach((node) => {
       if (node.x !== undefined && node.y !== undefined) {
-        // Convert graph coordinates to screen coordinates
         const screenCoords = graph.graph2ScreenCoords(node.x, node.y);
         if (
           screenCoords.x >= minX &&
@@ -457,27 +405,23 @@ export function ForceGraphView({
       }
     });
 
-    // Update selection
     if (nodesInBox.length > 0) {
-      setSelectedNodes((prev) => {
-        const newSet = new Set(prev);
-        nodesInBox.forEach((id) => newSet.add(id));
-        return newSet;
-      });
+      const newSet = new Set(selectedNodes);
+      nodesInBox.forEach((id) => newSet.add(id));
+      onSelectionChangeRef.current(newSet);
     }
 
     setIsDragging(false);
     setSelectionBox(null);
-  }, [isDragging, selectionBox, data.nodes]);
+  }, [isDragging, selectionBox, data.nodes, selectedNodes]);
 
-  // Draw custom node with label and glow effects for input/output neighbors
+  // Draw custom node with label and glow effects
   const drawNode = useCallback(
     (
       node: ForceGraphNode,
       ctx: CanvasRenderingContext2D,
       globalScale: number
     ) => {
-      // User-defined names take precedence over Excel-defined names
       const userDefinedName = cellNameMap?.get(node.id);
       const cellName = userDefinedName || node.excelName;
       const fontSize = 12 / globalScale;
@@ -489,9 +433,6 @@ export function ForceGraphView({
       const isNeighbor = isInput || isOutput;
       const isDimmed = hasActiveSelection && !isSelected && !isNeighbor;
 
-      // Determine label based on zoom level
-      // When zoomed out (globalScale < 0.5), show only name for named cells, address for others
-      // When zoomed in, show "name (address)" for named cells, just address for others
       let label: string;
       if (cellName) {
         if (globalScale < 0.5) {
@@ -503,11 +444,8 @@ export function ForceGraphView({
         label = node.address;
       }
 
-      // Save context state before applying glow effects
       ctx.save();
 
-      // Apply glow effect for selected, input, or output nodes
-      // Use fixed pixel values (not scaled) so glow looks consistent at all zoom levels
       if (isSelected) {
         ctx.shadowColor = SELECTION_COLORS.selected;
         ctx.shadowBlur = 15;
@@ -519,22 +457,18 @@ export function ForceGraphView({
         ctx.shadowBlur = 15;
       }
 
-      // Draw node circle (with glow if selected or neighbor)
       ctx.beginPath();
       ctx.arc(node.x || 0, node.y || 0, nodeRadius, 0, 2 * Math.PI);
       ctx.fillStyle = color;
       ctx.fill();
 
-      // For selected/input/output nodes, draw a second pass with stronger glow for visibility
       if (isSelected || isInput || isOutput) {
         ctx.shadowBlur = 25;
         ctx.fill();
       }
 
-      // Restore context to clear shadow effects before drawing other elements
       ctx.restore();
 
-      // Draw selection ring if selected (solid white)
       if (isSelected) {
         ctx.beginPath();
         ctx.arc(node.x || 0, node.y || 0, nodeRadius, 0, 2 * Math.PI);
@@ -543,8 +477,6 @@ export function ForceGraphView({
         ctx.stroke();
       }
 
-      // Draw label (dimmed if not selected/neighbor)
-      // For named cells, use a slightly different color to make them stand out
       ctx.font = `${fontSize}px Sans-Serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
@@ -567,7 +499,6 @@ export function ForceGraphView({
     ]
   );
 
-  // Calculate selection box style
   const selectionBoxStyle = useMemo(() => {
     if (!selectionBox) return null;
 
@@ -593,22 +524,8 @@ export function ForceGraphView({
       ref={containerRef}
       sx={{ width: "100%", height: "100%", position: "relative" }}
     >
+      {/* Toolbar with sheet legend and selection count */}
       <Box sx={{ p: 1, display: "flex", alignItems: "center", gap: 2 }}>
-        <FormControl size="small" sx={{ minWidth: 150 }}>
-          <InputLabel>Sheet Filter</InputLabel>
-          <Select
-            value={selectedSheet}
-            label="Sheet Filter"
-            onChange={(e) => onSelectedSheetChange(e.target.value)}
-          >
-            <MenuItem value="all">All Sheets</MenuItem>
-            {sheets.map((sheet) => (
-              <MenuItem key={sheet} value={sheet}>
-                {sheet}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
         <Stack direction="row" spacing={1}>
           {sheets.map((sheet) => (
             <Chip
@@ -622,25 +539,16 @@ export function ForceGraphView({
             />
           ))}
         </Stack>
-        <Box sx={{ borderLeft: 1, borderColor: "divider", pl: 2, ml: 1 }}>
-          <GraphFilterControls
-            maxNodes={maxNodes}
-            showOnlyFormulas={showOnlyFormulas}
-            stats={filterStats}
-            onMaxNodesChange={onMaxNodesChange}
-            onShowOnlyFormulasChange={onShowOnlyFormulasChange}
-          />
-        </Box>
         {selectedNodes.size > 0 && (
           <Typography
             variant="body2"
             sx={{ ml: "auto", color: "text.secondary" }}
           >
-            {selectedNodes.size} node{selectedNodes.size !== 1 ? "s" : ""}{" "}
-            selected
+            {selectedNodes.size} node{selectedNodes.size !== 1 ? "s" : ""} selected
           </Typography>
         )}
       </Box>
+
       <Box
         sx={{
           position: "relative",
@@ -678,7 +586,6 @@ export function ForceGraphView({
           enablePanInteraction={!isShiftDown}
           cooldownTime={500}
           onEngineStop={() => {
-            // Fit all nodes in view only on initial render
             if (graphRef.current && !hasInitialFit.current) {
               hasInitialFit.current = true;
               graphRef.current.zoomToFit(400, 50);

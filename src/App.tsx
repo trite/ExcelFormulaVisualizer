@@ -22,6 +22,10 @@ import {
   ListItem,
   ListItemText,
   Divider,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from "@mui/material";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import BubbleChartIcon from "@mui/icons-material/BubbleChart";
@@ -33,6 +37,10 @@ import * as XLSX from "xlsx";
 import { FileUpload } from "./components/FileUpload";
 import { ForceGraphView } from "./components/ForceGraphView";
 import { NodeDetails } from "./components/NodeDetails";
+import { CollapsiblePanel } from "./components/CollapsiblePanel";
+import { CellTree } from "./components/CellTree";
+import { CellSearch } from "./components/CellSearch";
+import { GraphFilterControls } from "./components/GraphFilterControls";
 import {
   parseExcelFileWithMetadata,
   workbookToGraphData,
@@ -88,6 +96,9 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Selection state (shared between tree and graph)
+  const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
+
   // Metadata state
   const [cellMetadata, setCellMetadata] = useState<CellMetadata>(
     createEmptyMetadata()
@@ -102,6 +113,9 @@ function App() {
   const [showOnlyFormulas, setShowOnlyFormulas] = useState(DEFAULT_FILTER_OPTIONS.showOnlyFormulas);
   const [selectedSheet, setSelectedSheet] = useState<string>("all");
 
+  // Search state
+  const [searchMatchIds, setSearchMatchIds] = useState<Set<string> | null>(null);
+
   // Build cell name map for quick lookups
   const cellNameMap = useMemo(
     () => buildCellNameMap(cellMetadata),
@@ -112,7 +126,6 @@ function App() {
   const namedCellIds = useMemo(() => {
     const ids = new Set<string>();
     for (const entry of cellMetadata.names) {
-      // Cell keys can be comma-separated lists
       const cellKeys = entry.cellKey.split(",").map((k) => k.trim());
       cellKeys.forEach((key) => ids.add(key));
     }
@@ -157,6 +170,29 @@ function App() {
     return graphDataToForceGraph(filteredGraphData, workbook.sheets);
   }, [filteredGraphData, workbook]);
 
+  // Handle selection change from either tree or graph
+  const handleSelectionChange = useCallback((nodes: Set<string>) => {
+    setSelectedNodes(nodes);
+    // If single node selected, update the node details
+    if (nodes.size === 1 && graphData) {
+      const nodeId = Array.from(nodes)[0];
+      const node = graphData.nodes.find((n) => n.id === nodeId);
+      if (node) {
+        setSelectedNode(node);
+      }
+    } else if (nodes.size === 0) {
+      setSelectedNode(null);
+    }
+  }, [graphData]);
+
+  // Handle node select from graph (for single selection with full node data)
+  const handleNodeSelect = useCallback((node: GraphNode | null) => {
+    setSelectedNode(node);
+    if (node) {
+      setSelectedNodes(new Set([node.id]));
+    }
+  }, []);
+
   const handleFileSelect = useCallback(async (file: File) => {
     setIsLoading(true);
     setError(null);
@@ -172,28 +208,22 @@ function App() {
       setRawWorkbook(wb);
       setGraphData(graph);
       setSelectedNode(null);
-      // Reset filter to show all sheets when loading new file
+      setSelectedNodes(new Set());
       setSelectedSheet("all");
 
-      // Check for metadata conflicts
       const localMetadata = loadMetadataFromStorage(workbookData.fileName);
       const conflict = compareMetadata(localMetadata, excelMetadata);
 
       if (conflict.hasConflict && localMetadata && excelMetadata) {
-        // Both sources have metadata with differences - show dialog
         setMetadataConflict(conflict);
         setShowConflictDialog(true);
-        // Temporarily use local metadata until user decides
         setCellMetadata(localMetadata);
       } else if (localMetadata) {
-        // Only local exists or no differences
         setCellMetadata(localMetadata);
       } else if (excelMetadata) {
-        // Only Excel exists
         setCellMetadata(excelMetadata);
         saveMetadataToStorage(workbookData.fileName, excelMetadata);
       } else {
-        // No metadata anywhere
         setCellMetadata(createEmptyMetadata());
       }
     } catch (err) {
@@ -229,10 +259,12 @@ function App() {
     setRawWorkbook(null);
     setGraphData(null);
     setSelectedNode(null);
+    setSelectedNodes(new Set());
     setError(null);
     setCellMetadata(createEmptyMetadata());
     setMetadataConflict(null);
     setSelectedSheet("all");
+    setSearchMatchIds(null);
   }, []);
 
   // Metadata update handlers
@@ -302,13 +334,11 @@ function App() {
     setShowClearConfirmDialog(false);
   }, [workbook]);
 
-  // Memoize sheets array to prevent unnecessary re-renders of graph components
   const sheets = useMemo(
     () => workbook?.sheets.map((s) => s.name) || [],
     [workbook]
   );
 
-  // Count metadata entries for display
   const metadataCount = cellMetadata.names.length + cellMetadata.notes.length;
 
   return (
@@ -420,29 +450,88 @@ function App() {
             </Container>
           ) : (
             <Box sx={{ display: "flex", height: "100%", gap: 2 }}>
+              {/* Left Panel - Filters, Search, and Cell Tree */}
+              <CollapsiblePanel
+                title="Cells"
+                side="left"
+                storageKey="left-panel"
+                width={320}
+              >
+                <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
+                  {/* Filter Controls */}
+                  <Box sx={{ p: 1.5, borderBottom: 1, borderColor: "divider" }}>
+                    <FormControl fullWidth size="small" sx={{ mb: 1.5 }}>
+                      <InputLabel>Sheet</InputLabel>
+                      <Select
+                        value={selectedSheet}
+                        label="Sheet"
+                        onChange={(e) => setSelectedSheet(e.target.value)}
+                      >
+                        <MenuItem value="all">All Sheets</MenuItem>
+                        {sheets.map((sheet) => (
+                          <MenuItem key={sheet} value={sheet}>
+                            {sheet}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <GraphFilterControls
+                      maxNodes={maxNodes}
+                      showOnlyFormulas={showOnlyFormulas}
+                      stats={filterStats}
+                      onMaxNodesChange={setMaxNodes}
+                      onShowOnlyFormulasChange={setShowOnlyFormulas}
+                    />
+                  </Box>
+
+                  {/* Search */}
+                  <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+                    <CellSearch
+                      graphData={filteredGraphData}
+                      cellMetadata={cellMetadata}
+                      cellNameMap={cellNameMap}
+                      onSearchResults={setSearchMatchIds}
+                    />
+                  </Box>
+
+                  {/* Cell Tree */}
+                  <Box sx={{ flexGrow: 1, overflow: "auto" }}>
+                    <CellTree
+                      graphData={filteredGraphData}
+                      selectedNodes={selectedNodes}
+                      onSelectionChange={handleSelectionChange}
+                      searchMatchIds={searchMatchIds}
+                      cellNameMap={cellNameMap}
+                    />
+                  </Box>
+                </Box>
+              </CollapsiblePanel>
+
+              {/* Center - Force Graph */}
               <Paper sx={{ flexGrow: 1, overflow: "hidden" }}>
                 {forceGraphData && (
                   <ForceGraphView
                     data={forceGraphData}
                     sheets={sheets}
-                    selectedNodeId={selectedNode?.id}
-                    onNodeSelect={setSelectedNode}
+                    selectedNodes={selectedNodes}
+                    onSelectionChange={handleSelectionChange}
+                    onNodeSelect={handleNodeSelect}
                     cellNameMap={cellNameMap}
-                    selectedSheet={selectedSheet}
-                    onSelectedSheetChange={setSelectedSheet}
-                    maxNodes={maxNodes}
-                    onMaxNodesChange={setMaxNodes}
-                    showOnlyFormulas={showOnlyFormulas}
-                    onShowOnlyFormulasChange={setShowOnlyFormulas}
-                    filterStats={filterStats}
                   />
                 )}
               </Paper>
-              <Box sx={{ width: 350, flexShrink: 0 }}>
+
+              {/* Right Panel - Node Details */}
+              <CollapsiblePanel
+                title="Details"
+                side="right"
+                storageKey="right-panel"
+                width={350}
+              >
                 <NodeDetails
                   node={selectedNode}
                   graphData={graphData}
-                  onNodeSelect={setSelectedNode}
+                  onNodeSelect={handleNodeSelect}
                   cellMetadata={cellMetadata}
                   onSetName={handleSetName}
                   onRemoveName={handleRemoveName}
@@ -450,7 +539,7 @@ function App() {
                   onUpdateNote={handleUpdateNote}
                   onRemoveNote={handleRemoveNote}
                 />
-              </Box>
+              </CollapsiblePanel>
             </Box>
           )}
         </Box>
