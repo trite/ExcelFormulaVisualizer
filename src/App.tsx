@@ -27,12 +27,12 @@ import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import BubbleChartIcon from "@mui/icons-material/BubbleChart";
 import DownloadIcon from "@mui/icons-material/Download";
 import DeleteForeverIcon from "@mui/icons-material/DeleteForever";
+import GitHubIcon from "@mui/icons-material/GitHub";
 import * as XLSX from "xlsx";
 
 import { FileUpload } from "./components/FileUpload";
 import { ForceGraphView } from "./components/ForceGraphView";
 import { NodeDetails } from "./components/NodeDetails";
-import { VersionSwitcher } from "./components/VersionSwitcher";
 import {
   parseExcelFileWithMetadata,
   workbookToGraphData,
@@ -321,7 +321,6 @@ function App() {
             <Typography variant="h6" component="div">
               Excel Formula Visualizer
             </Typography>
-            <VersionSwitcher />
             <Box sx={{ flexGrow: 1 }} />
             {workbook && (
               <>
@@ -371,6 +370,16 @@ function App() {
                 </Tooltip>
               </>
             )}
+            <Tooltip title="View on GitHub">
+              <IconButton
+                color="inherit"
+                href="https://github.com/trite/ExcelFormulaVisualizer"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <GitHubIcon />
+              </IconButton>
+            </Tooltip>
           </Toolbar>
         </AppBar>
 
