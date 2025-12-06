@@ -1,6 +1,11 @@
 {
-  "latest": "v0.1.2",
+  "latest": "v0.2.0",
   "versions": [
+    {
+      "version": "v0.2.0",
+      "description": "rework versioning",
+      "date": "2025-12-06"
+    },
     {
       "version": "v0.1.2",
       "description": "better support for versioning",
