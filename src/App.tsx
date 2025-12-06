@@ -321,6 +321,16 @@ function App() {
             <Typography variant="h6" component="div">
               Excel Formula Visualizer
             </Typography>
+            <Chip
+              label={__APP_VERSION__}
+              size="small"
+              sx={{
+                ml: 1,
+                height: 20,
+                fontSize: "0.75rem",
+                backgroundColor: "rgba(144, 202, 249, 0.2)",
+              }}
+            />
             <Box sx={{ flexGrow: 1 }} />
             {workbook && (
               <>
